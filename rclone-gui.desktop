@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Rclone Mount Setup
+Comment=Instala o rclone e monta sua nuvem como pasta
+Exec=AppRun
+Icon=rclone-gui
+Terminal=false
+Categories=Utility;Network;
