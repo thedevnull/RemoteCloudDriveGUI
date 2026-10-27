@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import queue
 import getpass
@@ -91,6 +92,82 @@ def find_terminal(cmd):
         if have(term):
             return [term] + args
     return None
+
+
+# Executado dentro do terminal: roda o comando em um pty e filtra a quebra de
+# linha extra que vem ao colar uma senha (ela iria para o prompt seguinte e
+# encerraria o assistente do rclone).
+PTY_HELPER = r'''
+import os, pty, sys, time, tty, termios, select, signal, fcntl
+
+CMD = sys.argv[1:]
+STRAY_WINDOW = 0.6   # segundos em que Enter "sobrando" apos a senha e descartado
+
+def sync_size(fd):
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, fcntl.ioctl(0, termios.TIOCGWINSZ, b"\0" * 8))
+    except Exception:
+        pass
+
+def run():
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.execvp(CMD[0], CMD)
+        except OSError as e:
+            print("Erro:", e)
+            os._exit(127)
+    sync_size(fd)
+    signal.signal(signal.SIGWINCH, lambda *a: sync_size(fd))
+    saved = termios.tcgetattr(0)
+    tty.setraw(0)
+    last_nl = 0.0
+    try:
+        while True:
+            try:
+                ready = select.select([0, fd], [], [])[0]
+            except InterruptedError:
+                continue
+            if fd in ready:
+                try:
+                    out = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not out:
+                    break
+                os.write(1, out)
+            if 0 in ready:
+                inp = os.read(0, 4096)
+                if not inp:
+                    break
+                now = time.monotonic()
+                try:
+                    pw_mode = not (termios.tcgetattr(fd)[3] & termios.ECHO)
+                except termios.error:
+                    pw_mode = False
+                if pw_mode and (b"\r" in inp or b"\n" in inp):
+                    # senha: envia so ate a primeira quebra de linha
+                    cut = min(i for i in (inp.find(b"\r"), inp.find(b"\n")) if i >= 0)
+                    inp = inp[:cut] + b"\r"
+                    last_nl = now
+                elif now - last_nl < STRAY_WINDOW and not inp.strip(b"\r\n"):
+                    continue   # Enter sobrando logo apos a senha: descarta
+                os.write(fd, inp)
+    finally:
+        termios.tcsetattr(0, termios.TCSADRAIN, saved)
+    status = os.waitpid(pid, 0)[1]
+    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+
+code = run()
+sys.stdout.write("\r\nTerminado (codigo %s). Pressione Enter para fechar..." % code)
+sys.stdout.flush()
+while select.select([0], [], [], 0.3)[0]:
+    os.read(0, 4096)
+try:
+    input()
+except EOFError:
+    pass
+'''
 
 
 # --------------------------------------------------------------------- GUI --
@@ -364,7 +441,7 @@ class App(tk.Tk):
         if not have("rclone"):
             messagebox.showwarning("rclone ausente", "Instale as dependências primeiro (passo 1).")
             return
-        cmd = find_terminal(["rclone", "config"])
+        cmd = find_terminal([sys.executable, "-c", PTY_HELPER, "rclone", "config"])
         if not cmd:
             messagebox.showerror("Erro", "Nenhum emulador de terminal encontrado.\n"
                                  "Rode 'rclone config' manualmente.")

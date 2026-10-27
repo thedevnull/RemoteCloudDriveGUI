@@ -98,6 +98,7 @@ systemctl --user disable --now rclone-mount   # parar e desativar
 - **Serviço não inicia**: veja `journalctl --user -u rclone-mount -n 50`. Causas comuns são a pasta de montagem não estar vazia ou o token do remote ter expirado (refaça a autorização com `rclone config reconnect NOME:`).
 - **Navegador não abre na criação do remote**: use *rclone config (terminal)* e siga o assistente.
 - **AppImage não abre por falta de FUSE no sistema**: rode com `./RcloneMountSetup-x86_64.AppImage --appimage-extract-and-run`.
+- **Terminal do `rclone config` fechava ao colar senha**: o Enter colado junto com a senha ia para o prompt seguinte e encerrava o assistente. O terminal agora descarta essa quebra de linha extra e, ao final, espera um Enter antes de fechar para você ler o resultado.
 - **Nenhum emulador de terminal encontrado**: rode `rclone config` manualmente.
 
 ## Desinstalar
